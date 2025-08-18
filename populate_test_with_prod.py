@@ -4,6 +4,54 @@ MongoDB Production to Test Database Duplication Script
 
 This script duplicates all collections from a production MongoDB database
 to a test environment, preserving data and indexes.
+
+USAGE:
+======
+
+Prerequisites:
+- Python 3.6+
+- pymongo library: pip install pymongo
+- Read-only access to production database
+- Write access to test database
+
+Basic Usage:
+    python populate_test_with_prod.py
+
+Dry Run (Preview):
+    python populate_test_with_prod.py --dry-run
+
+Environment Variables:
+    MONGO_PROD_URI          Production MongoDB connection string
+    MONGO_TEST_URI          Test MongoDB connection string  
+    MONGO_PROD_DB           Production database name
+    MONGO_TEST_DB           Test database name
+    MONGO_EXCLUDED_COLLECTIONS  Comma-separated collections to exclude
+    MONGO_BATCH_SIZE        Documents per batch (default: 1000)
+    MONGO_DRY_RUN           Set to 'true' for dry run mode
+
+Examples:
+    # Basic duplication
+    export MONGO_PROD_URI="mongodb://prod-server:27017"
+    export MONGO_TEST_URI="mongodb://test-server:27017"
+    export MONGO_PROD_DB="myapp_production"
+    export MONGO_TEST_DB="myapp_test"
+    python populate_test_with_prod.py
+
+    # Preview what would be copied
+    python populate_test_with_prod.py --dry-run
+
+    # Exclude specific collections
+    export MONGO_EXCLUDED_COLLECTIONS="logs,temp,cache"
+    python populate_test_with_prod.py
+
+Safety Features:
+- Always enforces read-only access to production
+- Validates source and destination are different databases
+- Drops and recreates test collections (complete replacement)
+- Detailed logging to mongo_duplication.log
+
+IMPORTANT: This script completely replaces all collections in the test database.
+Existing test data will be lost. Use dry-run mode first to preview changes.
 """
 
 import os
@@ -374,7 +422,34 @@ def parse_arguments():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='MongoDB Production to Test Database Duplicator'
+        description='MongoDB Production to Test Database Duplicator',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+USAGE EXAMPLES:
+
+  Basic duplication:
+    %(prog)s
+
+  Preview changes first (recommended):
+    %(prog)s --dry-run
+
+  With environment variables:
+    export MONGO_PROD_URI="mongodb://prod-server:27017"
+    export MONGO_TEST_URI="mongodb://test-server:27017"
+    export MONGO_PROD_DB="myapp_production"
+    export MONGO_TEST_DB="myapp_test"
+    %(prog)s
+
+  Exclude collections:
+    export MONGO_EXCLUDED_COLLECTIONS="logs,temp,cache"
+    %(prog)s --dry-run
+
+SAFETY NOTES:
+- Production database must be read-only accessible
+- Test database will be completely replaced
+- Always run with --dry-run first to preview changes
+- Check mongo_duplication.log for detailed operation logs
+        """
     )
     
     parser.add_argument(

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-MongoDB Users Collection Name Field Update Script
+MongoDB Users Phone Fields Copy Script
 
-This script updates the users collection by adding a 'name' field 
-that concatenates firstName and lastName fields.
+This script copies existing phone fields to new field names in the users collection:
+- phone -> phoneNumber
+- phoneVerification -> phoneNumberVerification
+
+The original fields are left untouched.
 
 USAGE:
 ======
@@ -14,53 +17,65 @@ Prerequisites:
 - Write access to the target database
 
 What it does:
-- Creates a new 'name' field by concatenating 'firstName' + ' ' + 'lastName'
-- Only processes documents that have both firstName and lastName
-- Skips documents that already have a 'name' field (by default)
-- Processes documents in batches for efficiency
+- Copies 'phone' field value to new 'phoneNumber' field (exact copy)
+- Copies 'phoneVerification' field value to new 'phoneNumberVerification' field (exact copy)
+- Only processes documents that have the source fields
+- Skips documents that already have the target fields (by default)
+- Preserves original fields completely untouched
 
 Basic Usage:
-    python update_users_name_field.py
+    python copy_phone_fields.py
 
 Dry Run (Preview):
-    python update_users_name_field.py --dry-run
+    python copy_phone_fields.py --dry-run
 
 Environment Variables:
     MONGO_URI               MongoDB connection string
     MONGO_DB                Database name
     MONGO_BATCH_SIZE        Documents per batch (default: 1000)
     MONGO_DRY_RUN           Set to 'true' for dry run mode
-    MONGO_SKIP_EXISTING     Set to 'false' to update existing name fields
+    MONGO_SKIP_EXISTING     Set to 'false' to overwrite existing target fields
 
 Examples:
-    # Basic usage - add name field to users collection
+    # Basic usage - copy phone fields in users collection
     export MONGO_URI="mongodb://localhost:27017"
     export MONGO_DB="myapp"
-    python update_users_name_field.py
+    python copy_phone_fields.py
 
-    # Preview what would be updated
-    python update_users_name_field.py --dry-run
+    # Preview what would be copied
+    python copy_phone_fields.py --dry-run
 
-    # Update all documents (including those with existing name field)
-    python update_users_name_field.py --no-skip-existing
+    # Overwrite existing target fields
+    python copy_phone_fields.py --no-skip-existing
 
     # Larger batch size for better performance
     export MONGO_BATCH_SIZE="5000"
-    python update_users_name_field.py
+    python copy_phone_fields.py
 
-Expected Document Structure:
-    Before: { "firstName": "John", "lastName": "Doe" }
-    After:  { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+Expected Document Transformation:
+    Before: { "phone": "+1234567890", "phoneVerification": true }
+    After:  { 
+        "phone": "+1234567890", 
+        "phoneVerification": true,
+        "phoneNumber": "+1234567890",
+        "phoneNumberVerification": true
+    }
+
+Field Mappings:
+- phone → phoneNumber (exact copy, any data type)
+- phoneVerification → phoneNumberVerification (exact copy, any data type)
 
 Safety Features:
 - Dry-run mode to preview changes
-- Only updates documents with both firstName and lastName
-- Skips documents with existing name field (by default)
+- Original fields are never modified or removed
+- Exact value copying (no data transformation)
+- Skips documents with existing target fields (by default)
 - Detailed analysis before making changes
-- Progress tracking and logging to users_name_update.log
+- Progress tracking and logging to phone_fields_copy.log
 
-IMPORTANT: This script modifies the users collection. Use --dry-run first 
-to preview changes before running the actual update.
+IMPORTANT: This script modifies the users collection by adding new fields.
+Original phone and phoneVerification fields remain completely unchanged.
+Use --dry-run first to preview changes.
 """
 
 import os
@@ -73,20 +88,20 @@ from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure
 import time
 
-class UsersNameUpdater:
+class PhoneFieldsCopier:
     def __init__(self, mongo_uri: str, db_name: str, 
                  batch_size: int = 1000,
                  dry_run: bool = False,
                  skip_existing: bool = True):
         """
-        Initialize the users name field updater.
+        Initialize the phone fields copier.
         
         Args:
             mongo_uri: MongoDB connection string
             db_name: Database name
             batch_size: Number of documents to process in each batch
             dry_run: If True, only show what would be updated without executing
-            skip_existing: If True, skip documents that already have a name field
+            skip_existing: If True, skip documents that already have the new fields
         """
         self.mongo_uri = mongo_uri
         self.db_name = db_name
@@ -94,6 +109,12 @@ class UsersNameUpdater:
         self.batch_size = batch_size
         self.dry_run = dry_run
         self.skip_existing = skip_existing
+        
+        # Field mappings: old_field -> new_field
+        self.field_mappings = {
+            'phone': 'phoneNumber',
+            'phoneVerification': 'phoneNumberVerification'
+        }
         
         self.client: Optional[MongoClient] = None
         self.db: Optional[Database] = None
@@ -107,7 +128,7 @@ class UsersNameUpdater:
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('users_name_update.log'),
+                logging.FileHandler('phone_fields_copy.log'),
                 logging.StreamHandler(sys.stdout)
             ]
         )
@@ -150,35 +171,29 @@ class UsersNameUpdater:
         Returns:
             Dict[str, Any]: MongoDB query
         """
-        # Base query: documents with both firstName and lastName
-        query = {
-            'firstName': {'$exists': True, '$ne': None, '$ne': ''},
-            'lastName': {'$exists': True, '$ne': None, '$ne': ''}
-        }
+        # Build query conditions
+        conditions = []
         
-        # If skipping existing, add condition that name field doesn't exist
-        if self.skip_existing:
-            query['name'] = {'$exists': False}
+        # Add conditions for documents that have the source fields
+        for old_field, new_field in self.field_mappings.items():
+            # Documents that have the old field
+            has_old_field = {old_field: {'$exists': True}}
+            
+            if self.skip_existing:
+                # Skip documents that already have the new field
+                has_old_field[new_field] = {'$exists': False}
+            
+            conditions.append(has_old_field)
+        
+        # Use $or to find documents that meet any of the conditions
+        if len(conditions) > 1:
+            query = {'$or': conditions}
+        elif len(conditions) == 1:
+            query = conditions[0]
+        else:
+            query = {}
         
         return query
-
-    def _create_name_field(self, first_name: str, last_name: str) -> str:
-        """
-        Create the name field by concatenating firstName and lastName.
-        
-        Args:
-            first_name: First name
-            last_name: Last name
-            
-        Returns:
-            str: Concatenated full name
-        """
-        # Clean up the names (strip whitespace)
-        first_name = str(first_name).strip() if first_name else ''
-        last_name = str(last_name).strip() if last_name else ''
-        
-        # Concatenate with a space
-        return f"{first_name} {last_name}".strip()
 
     def analyze_collection(self) -> Dict[str, int]:
         """
@@ -193,29 +208,27 @@ class UsersNameUpdater:
             # Total documents
             stats['total_documents'] = self.collection.count_documents({})
             
-            # Documents with firstName
-            stats['has_firstName'] = self.collection.count_documents({
-                'firstName': {'$exists': True, '$ne': None, '$ne': ''}
-            })
+            # Analyze each field mapping
+            for old_field, new_field in self.field_mappings.items():
+                # Documents with source field
+                stats[f'has_{old_field}'] = self.collection.count_documents({
+                    old_field: {'$exists': True}
+                })
+                
+                # Documents with target field
+                stats[f'has_{new_field}'] = self.collection.count_documents({
+                    new_field: {'$exists': True}
+                })
+                
+                # Documents that would be updated for this field
+                field_query = {old_field: {'$exists': True}}
+                if self.skip_existing:
+                    field_query[new_field] = {'$exists': False}
+                
+                stats[f'to_update_{old_field}'] = self.collection.count_documents(field_query)
             
-            # Documents with lastName
-            stats['has_lastName'] = self.collection.count_documents({
-                'lastName': {'$exists': True, '$ne': None, '$ne': ''}
-            })
-            
-            # Documents with both firstName and lastName
-            stats['has_both_names'] = self.collection.count_documents({
-                'firstName': {'$exists': True, '$ne': None, '$ne': ''},
-                'lastName': {'$exists': True, '$ne': None, '$ne': ''}
-            })
-            
-            # Documents that already have a name field
-            stats['has_name_field'] = self.collection.count_documents({
-                'name': {'$exists': True}
-            })
-            
-            # Documents that would be updated
-            stats['to_be_updated'] = self.collection.count_documents(self._build_query())
+            # Total documents that would be updated
+            stats['total_to_update'] = self.collection.count_documents(self._build_query())
             
             return stats
             
@@ -234,25 +247,28 @@ class UsersNameUpdater:
         self.logger.info("COLLECTION ANALYSIS")
         self.logger.info("=" * 60)
         self.logger.info(f"Total documents: {stats.get('total_documents', 0):,}")
-        self.logger.info(f"Documents with firstName: {stats.get('has_firstName', 0):,}")
-        self.logger.info(f"Documents with lastName: {stats.get('has_lastName', 0):,}")
-        self.logger.info(f"Documents with both names: {stats.get('has_both_names', 0):,}")
-        self.logger.info(f"Documents with existing name field: {stats.get('has_name_field', 0):,}")
-        self.logger.info(f"Documents to be updated: {stats.get('to_be_updated', 0):,}")
+        
+        for old_field, new_field in self.field_mappings.items():
+            self.logger.info(f"\nField mapping: {old_field} -> {new_field}")
+            self.logger.info(f"  Documents with '{old_field}': {stats.get(f'has_{old_field}', 0):,}")
+            self.logger.info(f"  Documents with '{new_field}': {stats.get(f'has_{new_field}', 0):,}")
+            self.logger.info(f"  To be updated for this field: {stats.get(f'to_update_{old_field}', 0):,}")
+        
+        self.logger.info(f"\nTotal documents to be updated: {stats.get('total_to_update', 0):,}")
         
         if self.skip_existing:
-            self.logger.info("Mode: SKIP documents with existing name field")
+            self.logger.info("Mode: SKIP documents with existing target fields")
         else:
-            self.logger.info("Mode: UPDATE all documents (including those with existing name field)")
+            self.logger.info("Mode: UPDATE all documents (including those with existing target fields)")
         
         self.logger.info("=" * 60)
 
-    def update_users_name_field(self) -> bool:
+    def copy_phone_fields(self) -> bool:
         """
-        Update the users collection with name field.
+        Copy phone fields in the users collection.
         
         Returns:
-            bool: True if update successful, False otherwise
+            bool: True if copy successful, False otherwise
         """
         start_time = time.time()
         
@@ -264,7 +280,7 @@ class UsersNameUpdater:
             stats = self.analyze_collection()
             self.display_analysis(stats)
             
-            documents_to_update = stats.get('to_be_updated', 0)
+            documents_to_update = stats.get('total_to_update', 0)
             
             if documents_to_update == 0:
                 self.logger.info("No documents need updating.")
@@ -281,7 +297,7 @@ class UsersNameUpdater:
             # Summary
             elapsed_time = time.time() - start_time
             self.logger.info(f"\n=== Update Summary ===")
-            self.logger.info(f"Documents updated: {updated_count:,}")
+            self.logger.info(f"Documents processed: {updated_count:,}")
             self.logger.info(f"Time elapsed: {elapsed_time:.2f} seconds")
             
             if updated_count == documents_to_update:
@@ -304,18 +320,24 @@ class UsersNameUpdater:
             cursor = self.collection.find(query).limit(5)  # Show first 5 examples
             
             self.logger.info("\nPreview of updates (first 5 documents):")
-            self.logger.info("-" * 40)
+            self.logger.info("-" * 50)
             
             for doc in cursor:
-                first_name = doc.get('firstName', '')
-                last_name = doc.get('lastName', '')
-                new_name = self._create_name_field(first_name, last_name)
+                self.logger.info(f"Document ID: {doc.get('_id')}")
                 
-                self.logger.info(f"ID: {doc.get('_id')}")
-                self.logger.info(f"  firstName: '{first_name}'")
-                self.logger.info(f"  lastName: '{last_name}'")
-                self.logger.info(f"  NEW name: '{new_name}'")
-                self.logger.info("-" * 40)
+                for old_field, new_field in self.field_mappings.items():
+                    old_value = doc.get(old_field)
+                    existing_new_value = doc.get(new_field)
+                    
+                    if old_value is not None:
+                        if existing_new_value is None or not self.skip_existing:
+                            self.logger.info(f"  {old_field}: {old_value} -> {new_field}: {old_value}")
+                        else:
+                            self.logger.info(f"  {old_field}: {old_value} (SKIP - {new_field} already exists: {existing_new_value})")
+                    else:
+                        self.logger.info(f"  {old_field}: Not present")
+                
+                self.logger.info("-" * 50)
                 
         except Exception as e:
             self.logger.error(f"Error during preview: {e}")
@@ -328,9 +350,8 @@ class UsersNameUpdater:
             total_docs: Total number of documents to update
             
         Returns:
-            int: Number of documents successfully updated
+            int: Number of documents successfully processed
         """
-        updated_count = 0
         processed_count = 0
         
         try:
@@ -339,19 +360,28 @@ class UsersNameUpdater:
             
             for doc in cursor:
                 try:
-                    # Create the name field
-                    first_name = doc.get('firstName', '')
-                    last_name = doc.get('lastName', '')
-                    new_name = self._create_name_field(first_name, last_name)
+                    # Build update operations for this document
+                    update_operations = {}
                     
-                    # Update the document
-                    result = self.collection.update_one(
-                        {'_id': doc['_id']},
-                        {'$set': {'name': new_name}}
-                    )
+                    for old_field, new_field in self.field_mappings.items():
+                        old_value = doc.get(old_field)
+                        existing_new_value = doc.get(new_field)
+                        
+                        # Only copy if source field exists and target field should be updated
+                        if old_value is not None:
+                            if existing_new_value is None or not self.skip_existing:
+                                update_operations[new_field] = old_value
                     
-                    if result.modified_count > 0:
-                        updated_count += 1
+                    # Only perform update if there are fields to update
+                    if update_operations:
+                        result = self.collection.update_one(
+                            {'_id': doc['_id']},
+                            {'$set': update_operations}
+                        )
+                        
+                        if result.modified_count > 0:
+                            fields_updated = ', '.join(update_operations.keys())
+                            self.logger.debug(f"Updated document {doc['_id']} with fields: {fields_updated}")
                     
                     processed_count += 1
                     
@@ -369,11 +399,11 @@ class UsersNameUpdater:
                 progress = (processed_count / total_docs) * 100
                 self.logger.info(f"Progress: {processed_count:,}/{total_docs:,} ({progress:.1f}%)")
             
-            return updated_count
+            return processed_count
             
         except Exception as e:
             self.logger.error(f"Error during batch updates: {e}")
-            return updated_count
+            return processed_count
 
 
 def load_config_from_env() -> Dict[str, Any]:
@@ -394,7 +424,7 @@ def parse_arguments():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='Update MongoDB users collection with name field (firstName + lastName)',
+        description='Copy phone fields in MongoDB users collection (phone -> phoneNumber, phoneVerification -> phoneNumberVerification)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 USAGE EXAMPLES:
@@ -402,10 +432,10 @@ USAGE EXAMPLES:
   Preview changes (recommended first step):
     %(prog)s --dry-run
 
-  Basic update (skip existing name fields):
+  Basic copy (skip existing target fields):
     %(prog)s
 
-  Update all documents (overwrite existing name fields):
+  Overwrite existing target fields:
     %(prog)s --no-skip-existing
 
   With environment variables:
@@ -417,15 +447,24 @@ USAGE EXAMPLES:
     export MONGO_BATCH_SIZE="5000"
     %(prog)s
 
+FIELD MAPPINGS:
+  phone → phoneNumber (exact copy)
+  phoneVerification → phoneNumberVerification (exact copy)
+
 DOCUMENT TRANSFORMATION:
-  Before: { "firstName": "John", "lastName": "Doe" }
-  After:  { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+  Before: { "phone": "+1234567890", "phoneVerification": true }
+  After:  { 
+    "phone": "+1234567890", 
+    "phoneVerification": true,
+    "phoneNumber": "+1234567890",
+    "phoneNumberVerification": true
+  }
 
 SAFETY NOTES:
 - Always run with --dry-run first to preview changes
-- Original firstName and lastName fields are preserved
-- Only documents with both firstName and lastName are processed
-- Check users_name_update.log for detailed operation logs
+- Original phone fields are never modified or removed
+- Only documents with source fields are processed
+- Check phone_fields_copy.log for detailed operation logs
         """
     )
     
@@ -439,23 +478,27 @@ SAFETY NOTES:
         '--skip-existing',
         action='store_true',
         default=True,
-        help='Skip documents that already have a name field (default)'
+        help='Skip documents that already have target fields (default)'
     )
     
     parser.add_argument(
         '--no-skip-existing',
         dest='skip_existing',
         action='store_false',
-        help='Update all documents, even those with existing name field'
+        help='Update all documents, even those with existing target fields'
     )
     
     return parser.parse_args()
 
 
 def main():
-    """Main function to run the update process."""
-    print("MongoDB Users Name Field Updater")
+    """Main function to run the copy process."""
+    print("MongoDB Users Phone Fields Copier")
     print("=" * 50)
+    print("Field mappings:")
+    print("  phone -> phoneNumber")
+    print("  phoneVerification -> phoneNumberVerification")
+    print()
     
     # Parse command line arguments
     args = parse_arguments()
@@ -474,12 +517,12 @@ def main():
     print(f"Collection: users (hardcoded)")
     print(f"Batch size: {config['batch_size']}")
     print(f"Mode: {'DRY RUN' if config['dry_run'] else 'LIVE EXECUTION'}")
-    print(f"Skip existing name fields: {'YES' if config['skip_existing'] else 'NO'}")
+    print(f"Skip existing target fields: {'YES' if config['skip_existing'] else 'NO'}")
     print()
     
     # Confirm before proceeding
     warning_msg = (
-        "This will update documents in the database" if not config['dry_run'] 
+        "This will copy phone fields in the database" if not config['dry_run'] 
         else "This is a dry run - no changes will be made"
     )
     response = input(f"Do you want to proceed? {warning_msg}. (y/N): ")
@@ -487,15 +530,15 @@ def main():
         print("Operation cancelled.")
         return
     
-    # Create updater and run
+    # Create copier and run
     try:
-        updater = UsersNameUpdater(**config)
+        copier = PhoneFieldsCopier(**config)
     except ValueError as e:
         print(f"Configuration error: {e}")
         sys.exit(1)
     
     try:
-        success = updater.update_users_name_field()
+        success = copier.copy_phone_fields()
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
         print("\nOperation interrupted by user.")

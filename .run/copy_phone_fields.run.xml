@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="update_users_name_field" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="copy_phone_fields" type="PythonConfigurationType" factoryName="Python">
     <module name="mongo_scripts" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
@@ -16,7 +16,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/update_users_name_field.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/copy_phone_fields.py" />
     <option name="PARAMETERS" value="--no-skip-existing" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
