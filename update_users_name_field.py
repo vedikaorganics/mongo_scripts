@@ -14,8 +14,11 @@ Prerequisites:
 - Write access to the target database
 
 What it does:
-- Creates a new 'name' field by concatenating 'firstName' + ' ' + 'lastName'
-- Only processes documents that have both firstName and lastName
+- Creates a new 'name' field for ALL users in the collection
+- Concatenates 'firstName' + ' ' + 'lastName' when both are available
+- Uses only 'firstName' when lastName is missing
+- Uses only 'lastName' when firstName is missing
+- Uses empty string when both firstName and lastName are missing
 - Skips documents that already have a 'name' field (by default)
 - Processes documents in batches for efficiency
 
@@ -48,13 +51,23 @@ Examples:
     export MONGO_BATCH_SIZE="5000"
     python update_users_name_field.py
 
-Expected Document Structure:
-    Before: { "firstName": "John", "lastName": "Doe" }
-    After:  { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+Expected Document Transformations:
+    Both names:     { "firstName": "John", "lastName": "Doe" } 
+                    → { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+    
+    First only:     { "firstName": "John" } 
+                    → { "firstName": "John", "name": "John" }
+    
+    Last only:      { "lastName": "Doe" } 
+                    → { "lastName": "Doe", "name": "Doe" }
+    
+    Neither:        { "email": "user@example.com" } 
+                    → { "email": "user@example.com", "name": "" }
 
 Safety Features:
 - Dry-run mode to preview changes
-- Only updates documents with both firstName and lastName
+- Processes ALL users in the collection
+- Handles missing firstName/lastName gracefully
 - Skips documents with existing name field (by default)
 - Detailed analysis before making changes
 - Progress tracking and logging to users_name_update.log
@@ -150,11 +163,8 @@ class UsersNameUpdater:
         Returns:
             Dict[str, Any]: MongoDB query
         """
-        # Base query: documents with both firstName and lastName
-        query = {
-            'firstName': {'$exists': True, '$ne': None, '$ne': ''},
-            'lastName': {'$exists': True, '$ne': None, '$ne': ''}
-        }
+        # Base query: all documents (no filtering by firstName/lastName)
+        query = {}
         
         # If skipping existing, add condition that name field doesn't exist
         if self.skip_existing:
@@ -162,23 +172,37 @@ class UsersNameUpdater:
         
         return query
 
-    def _create_name_field(self, first_name: str, last_name: str) -> str:
+    def _create_name_field(self, first_name: Any, last_name: Any) -> str:
         """
         Create the name field by concatenating firstName and lastName.
+        Handles missing or None values gracefully.
         
         Args:
-            first_name: First name
-            last_name: Last name
+            first_name: First name (can be None, empty, or missing)
+            last_name: Last name (can be None, empty, or missing)
             
         Returns:
-            str: Concatenated full name
+            str: Concatenated full name, or partial name, or empty string
         """
-        # Clean up the names (strip whitespace)
-        first_name = str(first_name).strip() if first_name else ''
-        last_name = str(last_name).strip() if last_name else ''
+        # Handle None, empty, or missing values
+        first_name_clean = ''
+        last_name_clean = ''
         
-        # Concatenate with a space
-        return f"{first_name} {last_name}".strip()
+        if first_name is not None and first_name != '':
+            first_name_clean = str(first_name).strip()
+        
+        if last_name is not None and last_name != '':
+            last_name_clean = str(last_name).strip()
+        
+        # Build name based on available parts
+        if first_name_clean and last_name_clean:
+            return f"{first_name_clean} {last_name_clean}"
+        elif first_name_clean:
+            return first_name_clean
+        elif last_name_clean:
+            return last_name_clean
+        else:
+            return ''
 
     def analyze_collection(self) -> Dict[str, int]:
         """
@@ -209,6 +233,46 @@ class UsersNameUpdater:
                 'lastName': {'$exists': True, '$ne': None, '$ne': ''}
             })
             
+            # Documents with only firstName
+            stats['has_only_firstName'] = self.collection.count_documents({
+                'firstName': {'$exists': True, '$ne': None, '$ne': ''},
+                '$or': [
+                    {'lastName': {'$exists': False}},
+                    {'lastName': None},
+                    {'lastName': ''}
+                ]
+            })
+            
+            # Documents with only lastName
+            stats['has_only_lastName'] = self.collection.count_documents({
+                'lastName': {'$exists': True, '$ne': None, '$ne': ''},
+                '$or': [
+                    {'firstName': {'$exists': False}},
+                    {'firstName': None},
+                    {'firstName': ''}
+                ]
+            })
+            
+            # Documents with neither firstName nor lastName
+            stats['has_neither_name'] = self.collection.count_documents({
+                '$and': [
+                    {
+                        '$or': [
+                            {'firstName': {'$exists': False}},
+                            {'firstName': None},
+                            {'firstName': ''}
+                        ]
+                    },
+                    {
+                        '$or': [
+                            {'lastName': {'$exists': False}},
+                            {'lastName': None},
+                            {'lastName': ''}
+                        ]
+                    }
+                ]
+            })
+            
             # Documents that already have a name field
             stats['has_name_field'] = self.collection.count_documents({
                 'name': {'$exists': True}
@@ -237,9 +301,13 @@ class UsersNameUpdater:
         self.logger.info(f"Documents with firstName: {stats.get('has_firstName', 0):,}")
         self.logger.info(f"Documents with lastName: {stats.get('has_lastName', 0):,}")
         self.logger.info(f"Documents with both names: {stats.get('has_both_names', 0):,}")
+        self.logger.info(f"Documents with only firstName: {stats.get('has_only_firstName', 0):,}")
+        self.logger.info(f"Documents with only lastName: {stats.get('has_only_lastName', 0):,}")
+        self.logger.info(f"Documents with neither name: {stats.get('has_neither_name', 0):,}")
         self.logger.info(f"Documents with existing name field: {stats.get('has_name_field', 0):,}")
         self.logger.info(f"Documents to be updated: {stats.get('to_be_updated', 0):,}")
         
+        self.logger.info("Processing: ALL users in the collection")
         if self.skip_existing:
             self.logger.info("Mode: SKIP documents with existing name field")
         else:
@@ -312,8 +380,8 @@ class UsersNameUpdater:
                 new_name = self._create_name_field(first_name, last_name)
                 
                 self.logger.info(f"ID: {doc.get('_id')}")
-                self.logger.info(f"  firstName: '{first_name}'")
-                self.logger.info(f"  lastName: '{last_name}'")
+                self.logger.info(f"  firstName: '{first_name}' (exists: {first_name != ''})")
+                self.logger.info(f"  lastName: '{last_name}' (exists: {last_name != ''})")
                 self.logger.info(f"  NEW name: '{new_name}'")
                 self.logger.info("-" * 40)
                 
@@ -417,14 +485,24 @@ USAGE EXAMPLES:
     export MONGO_BATCH_SIZE="5000"
     %(prog)s
 
-DOCUMENT TRANSFORMATION:
-  Before: { "firstName": "John", "lastName": "Doe" }
-  After:  { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+DOCUMENT TRANSFORMATIONS:
+  Both names:  { "firstName": "John", "lastName": "Doe" } 
+               → { "firstName": "John", "lastName": "Doe", "name": "John Doe" }
+  
+  First only:  { "firstName": "John" } 
+               → { "firstName": "John", "name": "John" }
+  
+  Last only:   { "lastName": "Doe" } 
+               → { "lastName": "Doe", "name": "Doe" }
+  
+  Neither:     { "email": "user@example.com" } 
+               → { "email": "user@example.com", "name": "" }
 
 SAFETY NOTES:
 - Always run with --dry-run first to preview changes
 - Original firstName and lastName fields are preserved
-- Only documents with both firstName and lastName are processed
+- ALL users in the collection are processed
+- Handles missing firstName/lastName gracefully
 - Check users_name_update.log for detailed operation logs
         """
     )
