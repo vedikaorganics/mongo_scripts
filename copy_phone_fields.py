@@ -4,7 +4,7 @@ MongoDB Users Phone Fields Copy Script
 
 This script copies existing phone fields to new field names in the users collection:
 - phone -> phoneNumber
-- phoneVerification -> phoneNumberVerification
+- phoneVerification -> phoneNumberVerified
 
 The original fields are left untouched.
 
@@ -18,7 +18,7 @@ Prerequisites:
 
 What it does:
 - Copies 'phone' field value to new 'phoneNumber' field (exact copy)
-- Copies 'phoneVerification' field value to new 'phoneNumberVerification' field (exact copy)
+- Copies 'phoneVerification' field value to new 'phoneNumberVerified' field (exact copy)
 - Only processes documents that have the source fields
 - Skips documents that already have the target fields (by default)
 - Preserves original fields completely untouched
@@ -58,12 +58,12 @@ Expected Document Transformation:
         "phone": "+1234567890", 
         "phoneVerification": true,
         "phoneNumber": "+1234567890",
-        "phoneNumberVerification": true
+        "phoneNumberVerified": true
     }
 
 Field Mappings:
 - phone → phoneNumber (exact copy, any data type)
-- phoneVerification → phoneNumberVerification (exact copy, any data type)
+- phoneVerification → phoneNumberVerified (exact copy, any data type)
 
 Safety Features:
 - Dry-run mode to preview changes
@@ -113,7 +113,7 @@ class PhoneFieldsCopier:
         # Field mappings: old_field -> new_field
         self.field_mappings = {
             'phone': 'phoneNumber',
-            'phoneVerification': 'phoneNumberVerification'
+            'phoneVerification': 'phoneNumberVerified'
         }
         
         self.client: Optional[MongoClient] = None
@@ -424,7 +424,7 @@ def parse_arguments():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='Copy phone fields in MongoDB users collection (phone -> phoneNumber, phoneVerification -> phoneNumberVerification)',
+        description='Copy phone fields in MongoDB users collection (phone -> phoneNumber, phoneVerification -> phoneNumberVerified)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 USAGE EXAMPLES:
@@ -449,7 +449,7 @@ USAGE EXAMPLES:
 
 FIELD MAPPINGS:
   phone → phoneNumber (exact copy)
-  phoneVerification → phoneNumberVerification (exact copy)
+  phoneVerification → phoneNumberVerified (exact copy)
 
 DOCUMENT TRANSFORMATION:
   Before: { "phone": "+1234567890", "phoneVerification": true }
@@ -457,7 +457,7 @@ DOCUMENT TRANSFORMATION:
     "phone": "+1234567890", 
     "phoneVerification": true,
     "phoneNumber": "+1234567890",
-    "phoneNumberVerification": true
+    "phoneNumberVerified": true
   }
 
 SAFETY NOTES:
