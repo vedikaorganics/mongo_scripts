@@ -1,0 +1,28 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="mark_orders_delivered_by_date" type="PythonConfigurationType" factoryName="Python">
+    <module name="mongo_scripts" />
+    <option name="ENV_FILES" value="" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="MONGO_DB" value="myDatabase" />
+      <env name="MONGO_URI" value="mongodb+srv://test_read_write:Xv6udB5RCWM1kvoP@test.gwkvxro.mongodb.net/?retryWrites=true&amp;w=majority&amp;appName=test" />
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="Python 3.12 virtualenv at ~/Documents/dev/nite/python_scripts/venv" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/update_orders_by_date_range.py" />
+    <option name="PARAMETERS" value="--start-date &quot;2024-01-01&quot; --end-date &quot;2025-08-01&quot;" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="false" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>
