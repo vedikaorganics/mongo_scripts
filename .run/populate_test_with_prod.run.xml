@@ -6,7 +6,7 @@
     <option name="PARENT_ENVS" value="true" />
     <envs>
       <env name="MONGO_BATCH_SIZE" value="1000" />
-      <env name="MONGO_EXCLUDED_COLLECTIONS" value="logs,temp" />
+      <env name="MONGO_EXCLUDED_COLLECTIONS" value="logs,temp,cms_content,cms_media_assets,cms_media_folders" />
       <env name="MONGO_PROD_DB" value="myDatabase" />
       <env name="MONGO_PROD_URI" value="" />
       <env name="MONGO_TEST_DB" value="myDatabase" />
